@@ -1,4 +1,3 @@
-import type { ConfigHookHandler } from "hardhat/types/hooks";
 import { z } from "zod";
 
 const ledgerOptionsSchema = z.object({
@@ -24,8 +23,8 @@ const networkConfigSchema = z.object({
   ledgerOptions: ledgerOptionsSchema,
 });
 
-const configHookHandler: ConfigHookHandler = {
-  resolved: async ({ resolvedConfig, userConfig }, { config }) => {
+const configHookHandler = {
+  resolved: async ({ resolvedConfig, userConfig }: any, _context: any) => {
     for (const networkName of Object.keys(resolvedConfig.networks)) {
       const network = resolvedConfig.networks[networkName];
       const userNetwork = userConfig.networks?.[networkName] || {};

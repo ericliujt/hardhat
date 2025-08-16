@@ -3,18 +3,13 @@ import {
   type DeviceId,
   type DeviceModelId,
   type ConnectedDevice,
-  type DeviceAction,
-  type DeviceActionState,
-  type TransportType,
-  LockedDeviceError,
-  type ApduResponse,
+  DeviceLockedError,
 } from "@ledgerhq/device-management-kit";
 import { 
   DeviceNotConnectedError,
   AppNotOpenError,
   type DMKOptions,
 } from "../types.js";
-import { firstValueFrom, timeout, catchError, of } from "rxjs";
 
 export class DMKManager {
   private dmk: DeviceManagementKit;
@@ -29,46 +24,22 @@ export class DMKManager {
       transportType: options?.transportType || "usb",
     };
 
-    this.dmk = new DeviceManagementKit({
-      transports: this.getTransports(),
-    });
+    this.dmk = new DeviceManagementKit();
   }
 
-  private getTransports(): TransportType[] {
-    switch (this.options.transportType) {
-      case "usb":
-        return ["USB"];
-      case "ble":
-        return ["BLE"];
-      default:
-        return ["USB"];
-    }
-  }
 
   async connect(): Promise<void> {
-    const deviceAction = this.dmk.startDiscovering();
+    const discoveryObs = this.dmk.startDiscovering({});
     
-    const discoveryState = await firstValueFrom(
-      deviceAction.pipe(
-        timeout(this.options.connectionTimeout),
-        catchError((error) => {
-          if (error.name === "TimeoutError") {
-            throw new DeviceNotConnectedError(
-              `No Ledger device found within ${this.options.connectionTimeout}ms`
-            );
-          }
-          throw error;
-        })
-      )
-    );
+    const discoveredDevices: any[] = [];
+    const subscription = discoveryObs.subscribe({
+      next: (device) => {
+        discoveredDevices.push(device);
+      },
+    });
 
-    if (discoveryState.status === "error") {
-      throw new DeviceNotConnectedError(
-        `Failed to discover device: ${discoveryState.error.message}`
-      );
-    }
-
-    const discoveredDevices = Array.from(discoveryState.discoveredDevices || []);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    subscription.unsubscribe();
     
     if (discoveredDevices.length === 0) {
       throw new DeviceNotConnectedError("No Ledger devices found");
@@ -106,33 +77,19 @@ export class DMKManager {
   }
 
   private async connectToDevice(deviceId: DeviceId): Promise<void> {
-    const connectAction = this.dmk.connect({ deviceId });
+    const sessionId = await this.dmk.connect({ device: { id: deviceId } as any });
     
-    const connectionState = await firstValueFrom(
-      connectAction.pipe(
-        timeout(this.options.connectionTimeout),
-        catchError((error) => {
-          if (error.name === "TimeoutError") {
-            throw new DeviceNotConnectedError(
-              `Connection timeout after ${this.options.connectionTimeout}ms`
-            );
-          }
-          throw error;
-        })
-      )
-    );
-
-    if (connectionState.status === "error") {
-      throw new DeviceNotConnectedError(
-        `Failed to connect to device: ${connectionState.error.message}`
-      );
+    if (!sessionId) {
+      throw new DeviceNotConnectedError("Failed to establish device connection");
     }
 
-    if (connectionState.status === "connected" && connectionState.connectedDevice) {
-      this.device = connectionState.connectedDevice;
-      this.sessionId = connectionState.sessionId;
+    this.sessionId = sessionId;
+    const connectedDevice = await this.dmk.getConnectedDevice({ sessionId });
+    
+    if (connectedDevice) {
+      this.device = connectedDevice;
     } else {
-      throw new DeviceNotConnectedError("Failed to establish device connection");
+      throw new DeviceNotConnectedError("Failed to get connected device");
     }
   }
 
@@ -141,30 +98,21 @@ export class DMKManager {
       throw new DeviceNotConnectedError();
     }
 
-    const openAppAction = this.dmk.sendCommand({
-      deviceId: this.device.id,
-      sessionId: this.sessionId,
-      command: {
+    try {
+      const result = await this.sendCommand({
         name: "open-app",
         params: { appName: "Ethereum" },
-      },
-    });
-
-    const result = await firstValueFrom(
-      openAppAction.pipe(
-        timeout(60000),
-        catchError((error) => {
-          if (error instanceof LockedDeviceError) {
-            throw new AppNotOpenError("Device is locked. Please unlock it and try again");
-          }
-          throw error;
-        })
-      )
-    );
-
-    if (result.status === "error") {
+      });
+      
+      if (!result) {
+        throw new AppNotOpenError("Failed to open Ethereum app");
+      }
+    } catch (error: any) {
+      if (error instanceof DeviceLockedError) {
+        throw new AppNotOpenError("Device is locked. Please unlock it and try again");
+      }
       throw new AppNotOpenError(
-        `Failed to open Ethereum app: ${result.error.message}`
+        `Failed to open Ethereum app: ${error.message}`
       );
     }
   }
@@ -174,67 +122,50 @@ export class DMKManager {
       throw new DeviceNotConnectedError();
     }
 
-    const commandAction = this.dmk.sendCommand({
-      deviceId: this.device.id,
-      sessionId: this.sessionId,
-      command,
-    });
+    try {
+      const result = await this.dmk.sendCommand({
+        sessionId: this.sessionId,
+        command,
+      });
 
-    const result = await firstValueFrom(
-      commandAction.pipe(
-        timeout(60000),
-        catchError((error) => {
-          if (error instanceof LockedDeviceError) {
-            throw new AppNotOpenError("Device is locked");
-          }
-          throw error;
-        })
-      )
-    );
+      if ((result as any).status === "error") {
+        throw new Error(`Command failed`);
+      }
 
-    if (result.status === "error") {
-      throw new Error(`Command failed: ${result.error.message}`);
+      return (result as any).data || result as T;
+    } catch (error: any) {
+      if (error instanceof DeviceLockedError) {
+        throw new AppNotOpenError("Device is locked");
+      }
+      throw error;
     }
-
-    return result.response as T;
   }
 
   async executeDeviceAction<T>(
-    createAction: () => DeviceAction<T>
+    createAction: () => any
   ): Promise<T> {
-    if (!this.device) {
+    if (!this.device || !this.sessionId) {
       throw new DeviceNotConnectedError();
     }
 
-    const action = createAction();
-    
-    const result = await firstValueFrom(
-      action.pipe(
-        timeout(60000),
-        catchError((error) => {
-          if (error instanceof LockedDeviceError) {
-            throw new AppNotOpenError("Device is locked");
-          }
-          throw error;
-        })
-      )
-    );
-
-    if ("error" in result && result.error) {
-      throw new Error(`Action failed: ${result.error.message}`);
+    try {
+      const action = createAction();
+      const result = await action;
+      return result as T;
+    } catch (error: any) {
+      if (error instanceof DeviceLockedError) {
+        throw new AppNotOpenError("Device is locked");
+      }
+      throw new Error(`Action failed: ${error.message}`);
     }
-
-    return result as T;
   }
 
   async disconnect(): Promise<void> {
     if (this.device && this.sessionId) {
       try {
-        await firstValueFrom(
-          this.dmk.disconnect({ sessionId: this.sessionId })
-        );
+        await this.dmk.disconnect({ sessionId: this.sessionId });
       } catch (error) {
-        console.error("Error disconnecting device:", error);
+        // Ignore disconnect errors
       }
       
       this.device = null;
