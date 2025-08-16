@@ -1,51 +1,67 @@
-import type { NetworkHookHandler } from "hardhat/types/hooks";
-import type { NetworkConnection } from "hardhat/types/network";
-import { DMKManager } from "../dmk-manager.js";
+import { LedgerSigner } from "../ledger-signer.js";
 import { LedgerProvider } from "../ledger-provider.js";
-import type { LedgerOptions } from "../../types.js";
 
-const networkHookHandler: NetworkHookHandler = {
-  newConnection: async ({ connection, networkConfig }, _context) => {
-    if (!networkConfig.ledgerAccounts || networkConfig.ledgerAccounts.length === 0) {
-      return { connection };
+const networkHookHandler = {
+  newConnection: async (context: any, next: any) => {
+    // Call the next handler in the chain to get the connection
+    const connection = await next(context);
+    
+    // Check if this network uses Ledger accounts
+    const networkConfig = connection.networkConfig;
+    
+    // Check for ledgerAccounts in the resolved config
+    if (!networkConfig?.ledgerAccounts || networkConfig.ledgerAccounts.length === 0) {
+      // Not a Ledger network, return unchanged
+      return connection;
     }
+    
+    console.log("Initializing Ledger for network...");
 
-    const ledgerOptions = networkConfig.ledgerOptions as LedgerOptions | undefined;
-
-    const dmkManager = new DMKManager(ledgerOptions?.dmkOptions);
+    // Get Ledger options or use defaults
+    const ledgerOptions = networkConfig.ledgerOptions || {};
+    const ledgerSigner = new LedgerSigner(ledgerOptions.dmkOptions || {
+      connectionTimeout: 30000,
+      transportType: "usb",
+    });
     
     const ledgerProvider = new LedgerProvider(
       connection.provider,
-      dmkManager,
+      ledgerSigner,
       {
         accounts: networkConfig.ledgerAccounts,
-        derivationFunction: ledgerOptions?.derivationFunction || 
+        derivationFunction: ledgerOptions.derivationFunction || 
           ((index: number) => `m/44'/60'/0'/0/${index}`),
       }
     );
 
     await ledgerProvider.initialize();
+    
+    // Get the Ledger accounts
+    const ledgerAccounts = ledgerProvider.getAccounts();
 
-    const enhancedConnection: NetworkConnection = {
+    // Replace the provider and accounts in the connection
+    const enhancedConnection = {
       ...connection,
       provider: ledgerProvider,
+      accounts: ledgerAccounts.map(acc => acc.address), // Override accounts
       ledger: {
-        deviceId: dmkManager.getDeviceId()!,
-        modelId: dmkManager.getModelId()!,
-        accounts: ledgerProvider.getAccounts(),
-        isConnected: dmkManager.isConnected(),
+        accounts: ledgerAccounts,
+        isConnected: ledgerSigner.isConnected(),
       },
     };
 
-    return { connection: enhancedConnection };
+    return enhancedConnection;
   },
 
-  connectionClosed: async ({ connection }, _context) => {
-    if (connection.ledger) {
-      const provider = connection.provider as LedgerProvider;
+  closeConnection: async (context: any, networkConnection: any, next: any) => {
+    // If this connection has ledger, disconnect it
+    if (networkConnection.ledger) {
+      const provider = networkConnection.provider as LedgerProvider;
       await provider.disconnect();
     }
-    return {};
+    
+    // Call the next handler
+    return next(context, networkConnection);
   },
 };
 
