@@ -203,8 +203,8 @@ export class LedgerProvider implements EthereumProvider {
       tx.type = 0;
     }
 
+    // Create unsigned transaction data (ethers doesn't allow 'from' in unsigned tx)
     const txData: any = {
-      from: tx.from,
       data: tx.data,
       value: tx.value?.toString(),
       nonce: tx.nonce,
