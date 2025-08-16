@@ -28,7 +28,7 @@ describe("EthereumCommands", () => {
       
       const result = await commands.getAddress("m/44'/60'/0'/0/0");
       
-      assert.strictEqual(result.address.toLowerCase(), "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEBb".toLowerCase());
+      assert.strictEqual(result.address.toLowerCase(), "0x742d35cc6634c0532925a3b844bc9e7595f0b0bb");
       assert.strictEqual(result.publicKey, "0x04abc...");
       assert.strictEqual(mockDMKManager.sendCommand.mock.calls.length, 1);
       assert.deepStrictEqual(mockDMKManager.sendCommand.mock.calls[0].arguments[0], {

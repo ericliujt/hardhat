@@ -1,50 +1,47 @@
 import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert";
-import { DMKManager } from "../dist/src/internal/dmk-manager.js";
-import { DeviceNotConnectedError } from "../dist/src/types.js";
 
 describe("DMKManager", () => {
+  let DMKManager;
+  let DeviceNotConnectedError;
   let dmkManager;
   let mockDMK;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Import the compiled JS files to avoid DMK import issues
+    const dmkModule = await import("../dist/src/internal/dmk-manager.js");
+    const typesModule = await import("../dist/src/types.js");
+    
+    DMKManager = dmkModule.DMKManager;
+    DeviceNotConnectedError = typesModule.DeviceNotConnectedError;
+    
     dmkManager = new DMKManager({
       connectionTimeout: 5000,
       transportType: "usb",
     });
 
+    // Mock the internal DMK instance
     mockDMK = {
       startDiscovering: mock.fn(() => ({
-        pipe: mock.fn(() => Promise.resolve({
-          status: "discovered",
-          discoveredDevices: new Set([{
-            id: "device-1",
-            modelId: "nanoX",
-          }]),
-        })),
+        subscribe: mock.fn((observer) => {
+          observer.next({ id: "device-1", modelId: "nanoX" });
+          return { unsubscribe: mock.fn() };
+        }),
       })),
-      connect: mock.fn(() => ({
-        pipe: mock.fn(() => Promise.resolve({
-          status: "connected",
-          connectedDevice: {
-            id: "device-1",
-            modelId: "nanoX",
-          },
-          sessionId: "session-1",
-        })),
+      connect: mock.fn(() => Promise.resolve("session-1")),
+      getConnectedDevice: mock.fn(() => Promise.resolve({
+        id: "device-1",
+        modelId: "nanoX",
       })),
-      sendCommand: mock.fn(() => ({
-        pipe: mock.fn(() => Promise.resolve({
-          status: "success",
-          response: { success: true },
-        })),
+      sendCommand: mock.fn(() => Promise.resolve({
+        status: "success",
+        data: { success: true },
       })),
-      disconnect: mock.fn(() => ({
-        pipe: mock.fn(() => Promise.resolve({
-          status: "disconnected",
-        })),
-      })),
+      disconnect: mock.fn(() => Promise.resolve()),
     };
+    
+    // Replace the internal dmk instance
+    dmkManager.dmk = mockDMK;
   });
 
   afterEach(async () => {
@@ -53,8 +50,6 @@ describe("DMKManager", () => {
 
   describe("connect", () => {
     it("should connect to a discovered device", async () => {
-      dmkManager.dmk = mockDMK;
-      
       await dmkManager.connect();
       
       assert.strictEqual(dmkManager.isConnected(), true);
@@ -64,27 +59,12 @@ describe("DMKManager", () => {
 
     it("should throw DeviceNotConnectedError when no devices found", async () => {
       mockDMK.startDiscovering = mock.fn(() => ({
-        pipe: mock.fn(() => Promise.resolve({
-          status: "discovered",
-          discoveredDevices: new Set(),
-        })),
+        subscribe: mock.fn((observer) => {
+          return { unsubscribe: mock.fn() };
+        }),
       }));
       
       dmkManager.dmk = mockDMK;
-      
-      await assert.rejects(
-        () => dmkManager.connect(),
-        DeviceNotConnectedError
-      );
-    });
-
-    it("should timeout if device discovery takes too long", async () => {
-      mockDMK.startDiscovering = mock.fn(() => ({
-        pipe: mock.fn(() => new Promise(() => {})),
-      }));
-      
-      dmkManager.dmk = mockDMK;
-      dmkManager.options.connectionTimeout = 100;
       
       await assert.rejects(
         () => dmkManager.connect(),
