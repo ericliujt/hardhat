@@ -23,8 +23,6 @@ export interface DeviceFilter {
 }
 
 export interface LedgerConnection {
-  deviceId: DeviceId;
-  modelId: DeviceModelId;
   accounts: LedgerAccount[];
   isConnected: boolean;
 }

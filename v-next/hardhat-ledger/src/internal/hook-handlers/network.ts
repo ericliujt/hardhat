@@ -1,4 +1,4 @@
-import { DMKManager } from "../dmk-manager.js";
+import { LedgerSigner } from "../ledger-signer.js";
 import { LedgerProvider } from "../ledger-provider.js";
 import type { LedgerOptions } from "../../types.js";
 
@@ -10,11 +10,11 @@ const networkHookHandler = {
 
     const ledgerOptions = networkConfig.ledgerOptions as LedgerOptions | undefined;
 
-    const dmkManager = new DMKManager(ledgerOptions?.dmkOptions);
+    const ledgerSigner = new LedgerSigner(ledgerOptions?.dmkOptions);
     
     const ledgerProvider = new LedgerProvider(
       connection.provider,
-      dmkManager,
+      ledgerSigner,
       {
         accounts: networkConfig.ledgerAccounts,
         derivationFunction: ledgerOptions?.derivationFunction || 
@@ -28,10 +28,8 @@ const networkHookHandler = {
       ...connection,
       provider: ledgerProvider,
       ledger: {
-        deviceId: dmkManager.getDeviceId()!,
-        modelId: dmkManager.getModelId()!,
         accounts: ledgerProvider.getAccounts(),
-        isConnected: dmkManager.isConnected(),
+        isConnected: ledgerSigner.isConnected(),
       },
     };
 

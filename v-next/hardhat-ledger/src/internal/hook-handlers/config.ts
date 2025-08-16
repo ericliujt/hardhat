@@ -16,10 +16,9 @@ const ledgerOptionsSchema = z.object({
 }).optional();
 
 const networkConfigSchema = z.object({
-  ledgerAccounts: z.union([
-    z.array(z.string()),
-    z.array(z.number()),
-  ]).optional(),
+  ledgerAccounts: z.array(
+    z.union([z.string(), z.number()])
+  ).optional(),
   ledgerOptions: ledgerOptionsSchema,
 });
 

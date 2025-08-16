@@ -1,6 +1,5 @@
 import { ethers } from "ethers";
-import type { DMKManager } from "./dmk-manager.js";
-import { EthereumCommands } from "./commands.js";
+import { LedgerSigner } from "./ledger-signer.js";
 import type { 
   LedgerAccount,
 } from "../types.js";
@@ -12,28 +11,25 @@ interface LedgerProviderOptions {
 }
 
 export class LedgerProvider extends ethers.JsonRpcProvider {
-  private dmkManager: DMKManager;
-  private commands: EthereumCommands;
+  private ledgerSigner: LedgerSigner;
   private accounts: LedgerAccount[] = [];
   private readonly options: LedgerProviderOptions;
   private baseProvider: ethers.JsonRpcProvider;
 
   constructor(
     baseProvider: ethers.JsonRpcProvider,
-    dmkManager: DMKManager,
+    ledgerSigner: LedgerSigner,
     options: LedgerProviderOptions
   ) {
     super(baseProvider._getConnection().url, baseProvider._network);
     
     this.baseProvider = baseProvider;
-    this.dmkManager = dmkManager;
-    this.commands = new EthereumCommands(dmkManager);
+    this.ledgerSigner = ledgerSigner;
     this.options = options;
   }
 
   async initialize(): Promise<void> {
-    await this.dmkManager.connect();
-    await this.dmkManager.openEthereumApp();
+    await this.ledgerSigner.connect();
     await this.loadAccounts();
   }
 
@@ -42,7 +38,7 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     
     for (const index of accountIndices) {
       const derivationPath = this.options.derivationFunction(index);
-      const { address, publicKey } = await this.commands.getAddress(derivationPath);
+      const { address, publicKey } = await this.ledgerSigner.getAddress(derivationPath);
       
       this.accounts.push({
         address,
@@ -82,7 +78,7 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     method: string,
     params: Array<any>
   ): Promise<any> {
-    if (!this.dmkManager.isConnected()) {
+    if (!this.ledgerSigner.isConnected()) {
       throw new DeviceNotConnectedError();
     }
 
@@ -132,12 +128,16 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     const chainId = Number(network.chainId);
 
     const tx: ethers.TransactionRequest = {
-      to: txRequest.to,
       from: account.address,
       data: txRequest.data || "0x",
       value: txRequest.value ? BigInt(txRequest.value) : 0n,
       chainId,
     };
+
+    if (txRequest.to) {
+      const toAddress = typeof txRequest.to === 'string' ? txRequest.to : await txRequest.to;
+      tx.to = toAddress;
+    }
 
     if (txRequest.nonce !== undefined) {
       tx.nonce = parseInt(txRequest.nonce, 16);
@@ -186,22 +186,22 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     };
     
     if (tx.to) {
-      const toAddress = typeof tx.to === 'string' ? tx.to : await tx.to;
-      txData.to = toAddress;
+      txData.to = tx.to;
     }
     
     const unsignedTx = ethers.Transaction.from(txData);
-    const serializedTx = unsignedTx.unsignedSerialized.substring(2);
+    const serializedTx = unsignedTx.unsignedSerialized;
+    const txBuffer = ethers.getBytes(serializedTx);
 
-    const signature = await this.commands.signTransaction(
+    const signature = await this.ledgerSigner.signTransaction(
       account.derivationPath,
-      serializedTx
+      new Uint8Array(txBuffer)
     );
 
     unsignedTx.signature = {
-      r: "0x" + signature.r,
-      s: "0x" + signature.s,
-      v: parseInt(signature.v, 16),
+      r: signature.r,
+      s: signature.s,
+      v: signature.v,
     };
 
     return unsignedTx.serialized;
@@ -221,7 +221,17 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     }
 
     const messageText = ethers.toUtf8String(message);
-    return this.commands.signMessage(account.derivationPath, messageText);
+    const signature = await this.ledgerSigner.signMessage(
+      account.derivationPath, 
+      messageText
+    );
+
+    // Combine signature components
+    const r = signature.r.padStart(64, '0');
+    const s = signature.s.padStart(64, '0');
+    const v = signature.v.toString(16).padStart(2, '0');
+    
+    return `0x${r}${s}${v}`;
   }
 
   private async handleSignTypedData(params: any[]): Promise<string> {
@@ -238,21 +248,21 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
       throw new Error(`Account ${address} not found in Ledger accounts`);
     }
 
-    const { domain, types, message } = typedData;
-    
-    const typesWithoutDomain = { ...types };
-    delete typesWithoutDomain.EIP712Domain;
-
-    return this.commands.signTypedData(
+    const signature = await this.ledgerSigner.signTypedData(
       account.derivationPath,
-      domain,
-      typesWithoutDomain,
-      message
+      typedData
     );
+
+    // Combine signature components
+    const r = signature.r.padStart(64, '0');
+    const s = signature.s.padStart(64, '0');
+    const v = signature.v.toString(16).padStart(2, '0');
+    
+    return `0x${r}${s}${v}`;
   }
 
   async disconnect(): Promise<void> {
-    await this.dmkManager.disconnect();
+    await this.ledgerSigner.disconnect();
     this.accounts = [];
   }
 }
