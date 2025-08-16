@@ -1,3 +1,14 @@
+import { task } from "hardhat/config";
+
+const ledgerAccountsTask = task("ledger:accounts", "Lists all accounts from the connected Ledger device")
+  .setAction(async () => ({
+    default: async (_params: any, hre: any) => {
+      const { ledgerAccountsTask } = await import("./tasks/ledger-accounts.js");
+      return ledgerAccountsTask(_params, hre);
+    },
+  }))
+  .build();
+
 const hardhatLedgerPlugin = {
   id: "@nomicfoundation/hardhat-ledger",
   hookHandlers: {
@@ -10,6 +21,7 @@ const hardhatLedgerPlugin = {
       return { default: () => Promise.resolve(module.default) };
     },
   },
+  tasks: [ledgerAccountsTask],
 };
 
 export default hardhatLedgerPlugin as any;

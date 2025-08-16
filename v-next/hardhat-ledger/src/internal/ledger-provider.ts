@@ -10,19 +10,23 @@ interface LedgerProviderOptions {
   derivationFunction: (index: number) => string;
 }
 
-export class LedgerProvider extends ethers.JsonRpcProvider {
+interface EthereumProvider {
+  request(args: { method: string; params?: any[] }): Promise<any>;
+  send?(method: string, params?: any[]): Promise<any>;
+  close?(): Promise<void>;
+}
+
+export class LedgerProvider implements EthereumProvider {
   private ledgerSigner: LedgerSigner;
   private accounts: LedgerAccount[] = [];
   private readonly options: LedgerProviderOptions;
-  private baseProvider: ethers.JsonRpcProvider;
+  private baseProvider: EthereumProvider;
 
   constructor(
-    baseProvider: ethers.JsonRpcProvider,
+    baseProvider: EthereumProvider,
     ledgerSigner: LedgerSigner,
     options: LedgerProviderOptions
   ) {
-    super(baseProvider._getConnection().url, baseProvider._network);
-    
     this.baseProvider = baseProvider;
     this.ledgerSigner = ledgerSigner;
     this.options = options;
@@ -74,13 +78,12 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     return [...this.accounts];
   }
 
-  override async send(
-    method: string,
-    params: Array<any>
-  ): Promise<any> {
+  async request(args: { method: string; params?: any[] }): Promise<any> {
     if (!this.ledgerSigner.isConnected()) {
       throw new DeviceNotConnectedError();
     }
+
+    const { method, params = [] } = args;
 
     switch (method) {
       case "eth_accounts":
@@ -105,13 +108,28 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
         return this.handleSignTypedData(params);
 
       default:
-        return super.send(method, params);
+        return this.baseProvider.request({ method, params });
+    }
+  }
+
+  // Legacy support for send method
+  async send(method: string, params?: any[]): Promise<any> {
+    return this.request({ method, params });
+  }
+
+  async close(): Promise<void> {
+    await this.disconnect();
+    if (this.baseProvider.close) {
+      await this.baseProvider.close();
     }
   }
 
   private async handleSendTransaction(txRequest: any): Promise<string> {
     const signedTx = await this.handleSignTransaction(txRequest);
-    return this.baseProvider.send("eth_sendRawTransaction", [signedTx]);
+    return this.baseProvider.request({ 
+      method: "eth_sendRawTransaction", 
+      params: [signedTx] 
+    });
   }
 
   private async handleSignTransaction(txRequest: any): Promise<string> {
@@ -124,8 +142,11 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
       throw new Error(`Account ${from} not found in Ledger accounts`);
     }
 
-    const network = await this.baseProvider.getNetwork();
-    const chainId = Number(network.chainId);
+    const chainIdHex = await this.baseProvider.request({ 
+      method: "eth_chainId", 
+      params: [] 
+    });
+    const chainId = parseInt(chainIdHex, 16);
 
     const tx: ethers.TransactionRequest = {
       from: account.address,
@@ -142,7 +163,11 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     if (txRequest.nonce !== undefined) {
       tx.nonce = parseInt(txRequest.nonce, 16);
     } else {
-      tx.nonce = await this.baseProvider.getTransactionCount(account.address, "pending");
+      const nonceHex = await this.baseProvider.request({ 
+        method: "eth_getTransactionCount", 
+        params: [account.address, "pending"] 
+      });
+      tx.nonce = parseInt(nonceHex, 16);
     }
 
     if (txRequest.gasLimit) {
@@ -150,7 +175,16 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     } else if (txRequest.gas) {
       tx.gasLimit = BigInt(txRequest.gas);
     } else {
-      tx.gasLimit = await this.baseProvider.estimateGas(tx);
+      const gasHex = await this.baseProvider.request({ 
+        method: "eth_estimateGas", 
+        params: [{
+          from: tx.from,
+          to: tx.to,
+          data: tx.data,
+          value: tx.value ? "0x" + tx.value.toString(16) : undefined,
+        }] 
+      });
+      tx.gasLimit = BigInt(gasHex);
     }
 
     if (txRequest.maxFeePerGas && txRequest.maxPriorityFeePerGas) {
@@ -161,15 +195,12 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
       tx.gasPrice = BigInt(txRequest.gasPrice);
       tx.type = 0;
     } else {
-      const feeData = await this.baseProvider.getFeeData();
-      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
-        tx.maxFeePerGas = feeData.maxFeePerGas;
-        tx.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
-        tx.type = 2;
-      } else {
-        tx.gasPrice = feeData.gasPrice || 0n;
-        tx.type = 0;
-      }
+      const gasPriceHex = await this.baseProvider.request({ 
+        method: "eth_gasPrice", 
+        params: [] 
+      });
+      tx.gasPrice = BigInt(gasPriceHex);
+      tx.type = 0;
     }
 
     const txData: any = {
