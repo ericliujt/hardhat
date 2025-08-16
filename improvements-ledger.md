@@ -4,13 +4,7 @@ Overall the Ledger Developer Portal provides a solid foundation for developers w
 
 ---
 
-## 1. TypeScript Documentation
-- **Completely empty**: TS Doc pages (`Device Management Kit`, `Device Signer Kit Ethereum`) are missing.
-- **Improvement idea**: Remove the links that just link back to the page itself.
-
----
-
-## 2. Ethereum Signer Kit
+## 1. Ethereum Signer Kit
 - **Incomplete parameter/return details**: Methods like `signTransaction`, `signTypedData` lack precise type and format documentation for it parameters.
 - **No error handling guidance**: Missing error codes, common failure cases (e.g., user cancel, invalid derivation path).
 - **Outdated transaction support**: Unclear compatibility with Ethereum standards other than EIP-712 and EIP-7702 (eg. EIP-1559, EIP-4337).
@@ -36,9 +30,16 @@ try {
 }
 ```
 
+### Identification of Unclear or Missing Information
+
+**Origin Token Requirements**
+- **Issue**: The documentation mentions `originToken` is required but doesn't explain how to obtain it
+- **Missing**: Application process, token validation, and usage guidelines
+- **Impact**: Developers cannot complete basic setup
+
 ---
 
-## 3. Legacy vs. Modern SDKs
+## 2. Legacy vs. Modern SDKs
 - **LedgerJS tutorials still featured**: Marked as deprecated but not consistently flagged.
 - **No migration guides**: No clear step-by-step transition from `ledger-js` to DMK/Signer Kits.
 - **Example improvement: Version-Specific Documentation**
@@ -66,3 +67,11 @@ const account = await signer.getAddress("44'/60'/0'/0/0");
 
 console.log("Migrated Address:", account.address);
 ```
+
+Legacy libraries are not kept on developer portal, however developers still might want to refer to these libraries so it might be good to keep legacy libraries in the documentation website.
+
+---
+
+## 3. TypeScript Documentation
+- **Completely empty**: TS Doc pages (`Device Management Kit`, `Device Signer Kit Ethereum`) are missing.
+- **Improvement idea**: Remove the links that just link back to the page itself.
