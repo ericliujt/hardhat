@@ -29,5 +29,7 @@ export async function ledgerAccountsTask(
   console.log(`\nConnected: ${connection.ledger.isConnected}`);
   
   // Close the connection when done
-  await hre.network.close(connection);
+  if (connection.provider?.close) {
+    await connection.provider.close();
+  }
 }

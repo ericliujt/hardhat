@@ -37,11 +37,11 @@ export class LedgerSigner {
     const { Observable } = await import("rxjs");
     const { Right, Left } = purifyModule;
     
+    // Store transport reference at factory level so it persists
+    let currentTransport: any = null;
+    
     // Create a transport factory function that matches DMK's expected interface
     const nodeHidTransportFactory = () => {
-      let currentTransport: any = null;
-      const devicePathMap = new Map<string, string>(); // Map DMK device IDs to HID paths
-      
       const transport = {
         getIdentifier: () => "node-hid",
         id: "node-hid",
@@ -54,22 +54,20 @@ export class LedgerSigner {
         isSupported: () => Promise.resolve(true),
         connect: async (deviceId: string) => {
           try {
-            // Get the actual HID path for this device
-            const hidPath = devicePathMap.get(deviceId);
-            
-            if (hidPath) {
-              // Use the stored HID path
-              currentTransport = await TransportNodeHid.open(hidPath);
-            } else {
-              // Fallback: create a new transport (will prompt for device selection)
-              currentTransport = await TransportNodeHid.create();
-            }
+            // Always use create() to get a fresh connection
+            // The stored HID path becomes stale after use
+            currentTransport = await TransportNodeHid.create();
             
             // Wrap the transport to provide DMK-expected interface
             const wrappedTransport = {
               ...currentTransport,
               sendApdu: async (apdu: Uint8Array) => {
                 try {
+                  // Ensure transport is still available
+                  if (!currentTransport) {
+                    return Left(new Error("Transport disconnected"));
+                  }
+                  
                   // Convert Uint8Array to Buffer for hw-transport
                   const buffer = Buffer.from(apdu);
                   const response = await currentTransport.exchange(buffer);
@@ -145,13 +143,8 @@ export class LedgerSigner {
             const subscription = TransportNodeHid.listen({
               next: (event: any) => {
                 if (event.type === "add") {
-                  // Generate a unique ID for DMK while storing the actual HID path
+                  // Generate a unique ID for DMK
                   const dmkDeviceId = `ledger-${Date.now()}`;
-                  const hidPath = event.descriptor;
-                  
-                  if (hidPath) {
-                    devicePathMap.set(dmkDeviceId, hidPath);
-                  }
                   
                   observer.next({
                     id: dmkDeviceId,
@@ -272,8 +265,14 @@ export class LedgerSigner {
       throw new DeviceNotConnectedError();
     }
 
+    // DMK expects derivation path as a string but without the "m/" prefix
+    // Convert from "m/44'/60'/0'/0/0" to "44'/60'/0'/0/0"
+    const cleanPath = derivationPath.startsWith("m/") 
+      ? derivationPath.slice(2) 
+      : derivationPath;
+
     const { observable } = this.signer.signTransaction(
-      derivationPath,
+      cleanPath,
       transaction,
       { domain }
     );
@@ -305,7 +304,12 @@ export class LedgerSigner {
       throw new DeviceNotConnectedError();
     }
 
-    const { observable } = this.signer.signMessage(derivationPath, message);
+    // DMK expects derivation path without the "m/" prefix
+    const cleanPath = derivationPath.startsWith("m/") 
+      ? derivationPath.slice(2) 
+      : derivationPath;
+
+    const { observable } = this.signer.signMessage(cleanPath, message);
 
     const result = await firstValueFrom(
       observable.pipe(
@@ -334,7 +338,12 @@ export class LedgerSigner {
       throw new DeviceNotConnectedError();
     }
 
-    const { observable } = this.signer.signTypedData(derivationPath, typedData);
+    // DMK expects derivation path without the "m/" prefix
+    const cleanPath = derivationPath.startsWith("m/") 
+      ? derivationPath.slice(2) 
+      : derivationPath;
+
+    const { observable } = this.signer.signTypedData(cleanPath, typedData);
 
     const result = await firstValueFrom(
       observable.pipe(
@@ -356,15 +365,22 @@ export class LedgerSigner {
   }
 
   async disconnect(): Promise<void> {
-    if (this.sessionId) {
+    // First, try to disconnect the DMK session
+    if (this.sessionId && this.dmk) {
       try {
         await this.dmk.disconnect({ sessionId: this.sessionId });
-      } catch (error) {
-        // Ignore disconnect errors
+      } catch (error: any) {
+        // Log but don't throw - disconnect errors are not critical
+        console.debug("[LedgerSigner] DMK disconnect error (can be ignored):", error.message);
       }
-      this.sessionId = null;
-      this.signer = null;
     }
+    
+    // Note: Transport cleanup is handled by DMK's disconnect
+    // The transport is managed in the factory closure and will be cleaned up there
+    
+    // Clear the session and signer references
+    this.sessionId = null;
+    this.signer = null;
   }
 
   isConnected(): boolean {
