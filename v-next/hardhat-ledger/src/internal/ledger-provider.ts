@@ -3,9 +3,6 @@ import type { DMKManager } from "./dmk-manager.js";
 import { EthereumCommands } from "./commands.js";
 import type { 
   LedgerAccount,
-  SignTransactionRequest,
-  SignMessageRequest,
-  SignTypedDataRequest,
 } from "../types.js";
 import { DeviceNotConnectedError } from "../types.js";
 
@@ -26,7 +23,7 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
     dmkManager: DMKManager,
     options: LedgerProviderOptions
   ) {
-    super(baseProvider.connection, baseProvider._network);
+    super(baseProvider._getConnection().url, baseProvider._network);
     
     this.baseProvider = baseProvider;
     this.dmkManager = dmkManager;
@@ -175,7 +172,25 @@ export class LedgerProvider extends ethers.JsonRpcProvider {
       }
     }
 
-    const unsignedTx = ethers.Transaction.from(tx);
+    const txData: any = {
+      from: tx.from,
+      data: tx.data,
+      value: tx.value?.toString(),
+      nonce: tx.nonce,
+      gasLimit: tx.gasLimit?.toString(),
+      gasPrice: tx.gasPrice?.toString(),
+      maxFeePerGas: tx.maxFeePerGas?.toString(),
+      maxPriorityFeePerGas: tx.maxPriorityFeePerGas?.toString(),
+      chainId: tx.chainId,
+      type: tx.type,
+    };
+    
+    if (tx.to) {
+      const toAddress = typeof tx.to === 'string' ? tx.to : await tx.to;
+      txData.to = toAddress;
+    }
+    
+    const unsignedTx = ethers.Transaction.from(txData);
     const serializedTx = unsignedTx.unsignedSerialized.substring(2);
 
     const signature = await this.commands.signTransaction(
