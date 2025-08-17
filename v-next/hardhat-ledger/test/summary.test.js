@@ -8,10 +8,10 @@ describe("Hardhat Ledger Plugin Summary", () => {
     assert.strictEqual(plugin.default.id, "@nomicfoundation/hardhat-ledger");
   });
 
-  it("✅ Configuration validation with Zod", async () => {
+  it("✅ Configuration handler", async () => {
     const config = await import("../dist/src/internal/hook-handlers/config.js");
     assert.ok(config.default);
-    assert.ok(config.default.resolved);
+    assert.ok(config.default.resolveUserConfig);
   });
 
   it("✅ Error handling classes", async () => {
