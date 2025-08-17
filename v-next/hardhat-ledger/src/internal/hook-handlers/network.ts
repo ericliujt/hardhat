@@ -14,8 +14,6 @@ const networkHookHandler = {
       // Not a Ledger network, return unchanged
       return connection;
     }
-    
-    console.log("Initializing Ledger for network...");
 
     // Get Ledger options or use defaults
     const ledgerOptions = networkConfig.ledgerOptions || {};

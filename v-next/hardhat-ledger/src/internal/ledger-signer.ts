@@ -370,8 +370,8 @@ export class LedgerSigner {
       try {
         await this.dmk.disconnect({ sessionId: this.sessionId });
       } catch (error: any) {
-        // Log but don't throw - disconnect errors are not critical
-        console.debug("[LedgerSigner] DMK disconnect error (can be ignored):", error.message);
+        // Ignore disconnect errors - they are not critical
+        // DMK may throw "Unknown transport" errors which can be safely ignored
       }
     }
     

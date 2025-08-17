@@ -1,6 +1,6 @@
 # @nomicfoundation/hardhat-ledger
 
-Hardhat plugin for integrating with Ledger hardware wallets using the modern Device Management Kit (DMK).
+Hardhat v3 plugin for integrating with Ledger hardware wallets using the modern Device Management Kit (DMK).
 
 ## Installation
 
@@ -10,36 +10,43 @@ npm install --save-dev @nomicfoundation/hardhat-ledger
 
 ## Quick Start
 
-Import the plugin in your `hardhat.config.js`:
-
-```javascript
-import "@nomicfoundation/hardhat-ledger";
-```
-
-Or if using TypeScript, in your `hardhat.config.ts`:
+Add the plugin to your `hardhat.config.ts`:
 
 ```typescript
-import "@nomicfoundation/hardhat-ledger";
+import hardhatLedgerPlugin from "@nomicfoundation/hardhat-ledger";
+
+const config: HardhatUserConfig = {
+  plugins: [hardhatLedgerPlugin],
+  networks: {
+    localhost: {
+      type: "http",
+      url: "http://127.0.0.1:8545",
+      ledgerAccounts: [0, 1, 2], // Use first 3 Ledger accounts
+    }
+  }
+};
+
+export default config;
 ```
 
 ## Configuration
 
-This plugin extends the Hardhat network configuration to support Ledger hardware wallets:
+### Network Configuration
+
+Add Ledger support to any network by including `ledgerAccounts` and optional `ledgerOptions`:
 
 ```typescript
 export default {
   networks: {
     mainnet: {
+      type: "http",
       url: "https://eth-mainnet.alchemyapi.io/v2/YOUR-API-KEY",
-      ledgerAccounts: [0, 1, 2], // Use first 3 Ledger accounts
+      ledgerAccounts: [0, 1, 2], // Account indices or paths
       ledgerOptions: {
         derivationFunction: (index) => `m/44'/60'/0'/0/${index}`,
         dmkOptions: {
           connectionTimeout: 30000,
-          transportType: "usb", // "usb" or "ble"
-          deviceFilter: {
-            modelId: "nanoX", // Optional: filter by model
-          }
+          transportType: "usb"
         }
       }
     }
@@ -49,152 +56,191 @@ export default {
 
 ### Configuration Options
 
-#### `ledgerAccounts`
+#### `ledgerAccounts` (required)
 
-Array of account indices or derivation paths to use from the Ledger device.
+Specifies which accounts to use from the Ledger device:
 
 ```typescript
-// Using indices (will use default derivation function)
+// Using account indices (will use default derivation function)
 ledgerAccounts: [0, 1, 2]
 
 // Using custom derivation paths
 ledgerAccounts: ["m/44'/60'/0'/0/0", "m/44'/60'/1'/0/0"]
 
-// Mixed
+// Mixed approach
 ledgerAccounts: [0, "m/44'/60'/1'/0/0", 2]
 ```
 
-#### `ledgerOptions`
+#### `ledgerOptions` (optional)
 
-Optional configuration for Ledger integration:
+Fine-tune Ledger integration:
 
-- `derivationFunction`: Function to generate derivation paths from indices
+- **`derivationFunction`**: Custom function to generate derivation paths
+  - Type: `(index: number) => string`
   - Default: `(index) => m/44'/60'/0'/0/${index}`
   
-- `dmkOptions`: Device Management Kit specific options
-  - `connectionTimeout`: Timeout in milliseconds for device connection (default: 30000)
-  - `transportType`: Connection type - `"usb"` (default) or `"ble"`
-  - `deviceFilter`: Optional filter to select specific devices
-    - `modelId`: Ledger model ID (e.g., "nanoX", "nanoS", "nanoSP")
-    - `deviceId`: Specific device ID
+- **`dmkOptions`**: Device Management Kit configuration
+  - **`connectionTimeout`**: Connection timeout in milliseconds
+    - Type: `number`
+    - Default: `30000`
+  - **`transportType`**: Connection method
+    - Type: `"usb"` | `"ble"`
+    - Default: `"usb"`
+  - **`deviceFilter`**: Filter for specific devices
+    - `modelId`: Filter by model (e.g., "flex", "nanoS", "nanoX")
+    - `deviceId`: Target specific device ID
 
 ## Usage
 
-Once configured, Ledger accounts can be used transparently with Hardhat:
+### List Ledger Accounts
+
+```bash
+npx hardhat ledger:accounts --network localhost
+```
+
+Output:
+```
+Ledger accounts:
+  [0]: 0xfd49eF6B572815318819De8a485BD9E9662892B1
+       Path: m/44'/60'/0'/0/0
+  [1]: 0x7A6aA4990DDa2c852a6848b70922807BB32F50d5
+       Path: m/44'/60'/0'/0/1
+  [2]: 0xe546996E51b182B1aCd9913f8cdd21A07ECB6840
+       Path: m/44'/60'/0'/0/2
+
+Connected: true
+```
+
+### Deploy Contracts with Ignition
+
+```bash
+npx hardhat ignition deploy ./ignition/modules/MyModule.ts --network localhost
+```
+
+The plugin automatically handles transaction signing through your Ledger device.
+
+### Programmatic Usage
 
 ```typescript
-import { ethers } from "hardhat";
+// Connect to network with Ledger
+const connection = await hre.network.connect();
 
-async function main() {
-  // Get configured Ledger accounts
-  const accounts = await ethers.getSigners();
-  
-  // Use first Ledger account
-  const ledgerSigner = accounts[0];
-  
-  // Deploy contract
-  const Contract = await ethers.getContractFactory("MyContract", ledgerSigner);
-  const contract = await Contract.deploy();
-  
-  // Send transaction
-  const tx = await ledgerSigner.sendTransaction({
-    to: "0x...",
-    value: ethers.parseEther("1.0")
-  });
-  
-  // Sign message
-  const message = "Hello from Ledger!";
-  const signature = await ledgerSigner.signMessage(message);
+// Access Ledger accounts
+if (connection.ledger) {
+  const accounts = connection.ledger.accounts;
+  console.log("First account:", accounts[0].address);
+  console.log("Derivation path:", accounts[0].derivationPath);
 }
-
-main().catch(console.error);
 ```
 
 ## Features
 
-### Device Management Kit Integration
-
-This plugin uses Ledger's modern Device Management Kit (DMK) which provides:
-
-- **Improved Connection Handling**: Automatic device discovery and connection management
-- **Better Error Messages**: Clear, actionable error messages
-- **State Management**: Track device connection state
-- **Multiple Transport Support**: USB and Bluetooth connectivity
-- **Timeout Management**: Built-in timeout and cancellation support
-
 ### Supported Operations
 
-- Transaction signing (legacy, EIP-155, EIP-1559)
-- Message signing (personal_sign, eth_sign)
-- Typed data signing (EIP-712)
-- Multiple account management
-- Custom derivation paths
+- ✅ **Transaction Signing**: Legacy, EIP-155, EIP-1559, and EIP-2930 transactions
+- ✅ **Message Signing**: Personal sign and eth_sign
+- ✅ **Typed Data Signing**: Full EIP-712 support
+- ✅ **Contract Deployment**: Via Hardhat Ignition or scripts
+- ✅ **Multiple Accounts**: Manage multiple accounts from single device
+- ✅ **Custom Derivation Paths**: Full BIP44 path customization
 
-## Migration from Legacy Plugin
+### Device Management Kit (DMK) Benefits
 
-If migrating from the old `@nomiclabs/hardhat-ledger` plugin:
-
-### Key Differences
-
-1. **Package Name**: Changed to `@nomicfoundation/hardhat-ledger`
-2. **Dependencies**: Uses DMK instead of individual transport libraries
-3. **Configuration**: New `dmkOptions` for device management
-4. **Connection**: Explicit connection management with better error handling
-
-### Migration Steps
-
-1. Uninstall old plugin:
-   ```bash
-   npm uninstall @nomiclabs/hardhat-ledger
-   ```
-
-2. Install new plugin:
-   ```bash
-   npm install --save-dev @nomicfoundation/hardhat-ledger
-   ```
-
-3. Update configuration:
-   ```typescript
-   // Old
-   ledgerAccounts: ["0x..."]
-   
-   // New
-   ledgerAccounts: [0, 1, 2],
-   ledgerOptions: {
-     dmkOptions: {
-       transportType: "usb"
-     }
-   }
-   ```
+- **Auto-discovery**: Automatic device detection and connection
+- **Better Error Handling**: Clear, actionable error messages
+- **Connection Management**: Robust connection state handling
+- **Modern Architecture**: Built on reactive programming patterns
+- **Transport Flexibility**: USB and Bluetooth support
 
 ## Troubleshooting
 
-### Device Not Found
+### Common Issues
 
-- Ensure Ledger device is connected and unlocked
-- Open the Ethereum app on your Ledger device
-- Check USB/Bluetooth permissions
-- Try increasing `connectionTimeout` in configuration
+#### Device Not Found
+```
+Error: cannot open device with path...
+```
 
-### Transaction Rejected
+**Solutions:**
+- Ensure Ledger is connected and unlocked
+- Open the Ethereum app on your device
+- Close other applications using the device
+- Try unplugging and reconnecting the device
 
-- Verify transaction details on device screen
-- Ensure sufficient balance for gas fees
-- Check network configuration matches device settings
+#### Insufficient Funds
+```
+ProviderError: Sender doesn't have enough funds to send tx
+```
 
-### App Not Open
+**Solution:** Fund your Ledger address. For local development:
+```bash
+# Using cast (Foundry)
+cast rpc eth_sendTransaction '{"from":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","to":"YOUR_LEDGER_ADDRESS","value":"0xde0b6b3a7640000"}' --rpc-url http://localhost:8545
+```
 
-- Open the Ethereum app on your Ledger device
-- Ensure "Contract data" is enabled in app settings
-- Update Ethereum app to latest version
+#### Invalid Number Error
+```
+Error: invalid number provided
+```
+
+**Solution:** Update to latest version - this issue has been fixed.
+
+### Device Requirements
+
+- Ledger device with latest firmware
+- Ethereum app installed and updated
+- "Blind signing" or "Contract data" enabled in Ethereum app settings
+- USB cable (for USB connection) or Bluetooth enabled (for BLE)
+
+## Technical Details
+
+### Architecture
+
+The plugin implements:
+1. **Network Hook Handler**: Intercepts network connections to inject Ledger provider
+2. **Ledger Provider**: EIP-1193 compatible provider that handles signing
+3. **Ledger Signer**: DMK integration for device communication
+4. **Task Registration**: Adds `ledger:accounts` task
+
+### Derivation Paths
+
+Default Ethereum derivation path: `m/44'/60'/0'/0/{index}`
+
+- `44'`: BIP44 purpose
+- `60'`: Ethereum coin type
+- `0'`: Account (hardened)
+- `0`: Change (external chain)
+- `{index}`: Address index
+
+## Development
+
+### Building
+
+```bash
+npm install
+npm run build
+```
+
+### Testing with Example Project
+
+```bash
+cd hardhat-example
+npm install
+npx hardhat node # In one terminal
+npx hardhat ledger:accounts --network localhost # In another
+```
 
 ## Requirements
 
-- Node.js 18+ 
+- Node.js 18+
 - Hardhat v3 (v-next)
-- Ledger device with Ethereum app installed
+- Ledger device with Ethereum app
 - USB or Bluetooth connectivity
 
 ## License
 
 MIT
+
+## Support
+
+For issues and feature requests, please visit the [GitHub repository](https://github.com/NomicFoundation/hardhat).
